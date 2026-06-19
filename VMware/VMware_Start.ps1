@@ -1,31 +1,87 @@
-# Requires -RunAsAdministrator
-#
-# Shortcut Settings: Set Run As Administrator
-# Target: %USERPROFILE%\AppData\Local\Microsoft\WindowsApps\Microsoft.PowerShell_8wekyb3d8bbwe\pwsh.exe -ExecutionPolicy Bypass -File "%USERPROFILE%\Documents\Scripts\VMware\VMware_Start.ps1"
-# Start in: %USERPROFILE%\Documents\Scripts\VMware\
+#Requires -RunAsAdministrator
 
-$services = @("VMAuthdService", "VMnetDHCP", "VMware NAT Service", "VMUSBArbService")
+$configPath = Join-Path $PSScriptRoot "vmware-services.json"
 
-Write-Host "Starting VMware Services in parallel..." -ForegroundColor Cyan
-
-# Run the parallel loop and capture any errors/failures into an array
-$errors = $services | ForEach-Object -Parallel {
-    try {
-        Start-Service -Name $_ -ErrorAction Stop
-        Write-Host "Successfully started: $_" -ForegroundColor Green
-        return $false # No error for this service
-    } catch {
-        Write-Warning "Failed to start $_ : $_"
-        return $true  # Had an error
-    }
+if (-not (Test-Path $configPath)) {
+    Write-Error "Config file not found: $configPath"
+    exit 1
 }
 
-# Launch VMware Workstation immediately
-Write-Host "Launching VMware Workstation..." -ForegroundColor Cyan
-Start-Process "C:\Program Files\VMware\VMware Workstation\vmware.exe"
+$config = Get-Content $configPath -Raw | ConvertFrom-Json
 
-# Check if any of the parallel threads returned a $true (error)
-if ($errors -contains $true) {
-    Write-Host "`n[ERROR] One or more services failed to start." -ForegroundColor Red
-    Read-Host "Press Enter to close this window"
+$startedByScript = [System.Collections.Generic.List[string]]::new()
+
+try {
+    foreach ($service in $config.services) {
+
+        $name = $service.name
+
+        try {
+            $svc = Get-Service -Name $name -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Service '$name' not found."
+            continue
+        }
+
+        # Ensure Manual startup type
+        $cim = Get-CimInstance Win32_Service -Filter "Name='$name'"
+
+        if ($cim.StartMode -ne 'Manual') {
+            Write-Host "Setting $name startup type to Manual..."
+            Set-Service -Name $name -StartupType Manual
+        }
+
+        # Start only if not already running
+        if ($svc.Status -ne 'Running') {
+
+            Write-Host "Starting $name..."
+
+            Start-Service -Name $name -ErrorAction Stop
+
+            $svc.WaitForStatus(
+                [System.ServiceProcess.ServiceControllerStatus]::Running,
+                [TimeSpan]::FromSeconds(20)
+            )
+
+            $startedByScript.Add($name)
+        }
+    }
+
+    Write-Host "Launching VMware..."
+
+    $proc = Start-Process `
+        -FilePath $config.programPath `
+        -PassThru
+
+    $proc.WaitForExit()
+}
+finally {
+
+    Write-Host "VMware closed."
+
+    foreach ($name in $startedByScript) {
+
+        try {
+
+            $svc = Get-Service -Name $name -ErrorAction Stop
+
+            if ($svc.Status -eq 'Running') {
+
+                Write-Host "Stopping $name..."
+
+                Stop-Service -Name $name -Force -ErrorAction Stop
+
+                $svc.WaitForStatus(
+                    [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+                    [TimeSpan]::FromSeconds(20)
+                )
+            }
+        }
+        catch {
+            Write-Warning "Failed to stop $name : $_"
+        }
+    }
+
+    Write-Host "Cleanup complete."
 }

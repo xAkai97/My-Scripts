@@ -137,6 +137,17 @@ function Add-VenvSearchPath {
 # =====================================================================
 
 function venv {
+    param(
+        [Parameter(Position = 0, Mandatory = $false)]
+        [string]$EnvName
+    )
+
+    # If menu flags are passed to venv, forward them to .venv
+    if ($EnvName -ine "" -and ($EnvName -eq "-m" -or $EnvName -eq "-M" -or $EnvName -eq "-Menu" -or $EnvName -eq "-menu")) {
+        .venv -Menu
+        return
+    }
+
     Write-Host "Activating local venv..." -ForegroundColor Green
     if (Test-Path ".\venv\Scripts\Activate.ps1") {
         . .\venv\Scripts\Activate.ps1
@@ -147,10 +158,114 @@ function venv {
 
 function .venv {
     param(
-        [string]$EnvName
+        [Parameter(Position = 0, Mandatory = $false)]
+        [string]$EnvName,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Menu
     )
     
-    # 1) Explicit argument mode
+    # Check if the text argument matches any of the menu flags
+    $IsMenuTrigger = $EnvName -ine "" -and ($EnvName -eq "-m" -or $EnvName -eq "-M" -or $EnvName -eq "-Menu" -or $EnvName -eq "-menu")
+
+    # 1) Menu Selection Mode
+    if ($Menu -or $IsMenuTrigger) {
+        $SearchDirs = Get-VenvSearchPaths
+        $AvailableEnvs = [System.Collections.Generic.List[PSCustomObject]]::new()
+        
+        # Scan for existing environments in central search paths
+        foreach ($Dir in $SearchDirs) {
+            if (Test-Path $Dir) {
+                $SubDirs = Get-ChildItem -Path $Dir -Directory
+                foreach ($Sub in $SubDirs) {
+                    if (Test-Path (Join-Path $Sub.FullName "Scripts\Activate.ps1")) {
+                        $AvailableEnvs.Add([PSCustomObject]@{
+                            Name       = $Sub.Name
+                            FullPath   = $Sub.FullName
+                            ParentDir  = $Dir
+                            Type       = "Existing"
+                        })
+                    }
+                }
+            }
+        }
+
+        # Build the Interactive Menu
+        Write-Host "`n--- Virtual Environment Menu ---" -ForegroundColor Cyan
+        $MenuIndex = 1
+
+        # OPTION 1: Always Current Folder Creation
+        Write-Host " [$MenuIndex] Create brand new '.venv' in CURRENT folder" -ForegroundColor Yellow
+        $MenuIndex++
+        
+        # List existing environments
+        if ($AvailableEnvs.Count -gt 0) {
+            Write-Host "`nExisting Environments:" -ForegroundColor Green
+            foreach ($EnvItem in $AvailableEnvs) {
+                Write-Host " [$MenuIndex] $($EnvItem.Name) ($($EnvItem.ParentDir))"
+                $EnvItem | Add-Member -NotePropertyName "MenuID" -NotePropertyValue $MenuIndex
+                $MenuIndex++
+            }
+        }
+
+        # List central paths for alternative remote creation
+        Write-Host "`nCreate New Environment In Central Path:" -ForegroundColor Yellow
+        $CreationPaths = @{}
+        foreach ($Dir in $SearchDirs) {
+            if (Test-Path $Dir) {
+                Write-Host " [$MenuIndex] New venv in -> $Dir"
+                $CreationPaths[$MenuIndex] = $Dir
+                $MenuIndex++
+            }
+        }
+
+        Write-Host " [q] Cancel / Exit" -ForegroundColor Red
+        Write-Host ""
+
+        $Selection = Read-Host "Select an option [1-$($MenuIndex - 1)]"
+        
+        if ($Selection -eq 'q' -or [string]::IsNullOrWhiteSpace($Selection)) {
+            Write-Host "Operation cancelled." -ForegroundColor Gray
+            return
+        }
+
+        if ($Selection -match '^\d+$') {
+            $SelectedIndex = [int]$Selection
+            
+            # Choice 1: Current Folder Local Venv
+            if ($SelectedIndex -eq 1) {
+                New-Venv -Path ".venv"
+                return
+            }
+
+            # Choice: Existing environment activation
+            $ChosenEnv = $AvailableEnvs | Where-Object { $_.MenuID -eq $SelectedIndex }
+            if ($ChosenEnv) {
+                .venv $ChosenEnv.FullPath
+                return
+            }
+
+            # Choice: Create environment inside a central search path
+            if ($CreationPaths.ContainsKey($SelectedIndex)) {
+                $BasePath = $CreationPaths[$SelectedIndex]
+                $NewName = Read-Host "Enter a folder name for your new environment"
+                if ([string]::IsNullOrWhiteSpace($NewName)) {
+                    Write-Host "Invalid name. Cancelling." -ForegroundColor Red
+                    return
+                }
+                New-Venv -Path (Join-Path $BasePath $NewName)
+                return
+            }
+
+            Write-Host "Invalid menu selection." -ForegroundColor Red
+            return
+        } else {
+            Write-Host "Invalid input." -ForegroundColor Red
+            return
+        }
+    }
+
+    # 2) Explicit argument mode (Stays intact)
     if ($EnvName -ne "") {
         if ([System.IO.Path]::IsPathRooted($EnvName)) {
             $DirectScript = if ($EnvName.EndsWith("Activate.ps1")) { $EnvName } else { Join-Path $EnvName "Scripts\Activate.ps1" }
@@ -164,7 +279,7 @@ function .venv {
         return
     }
 
-    # 2) Local fallback: .venv then venv directories
+    # 3) Local fallback: .venv then venv directories
     foreach ($LocalName in @(".venv", "venv")) {
         $LocalScript = ".\$LocalName\Scripts\Activate.ps1"
         if (Test-Path $LocalScript) {
@@ -175,7 +290,7 @@ function .venv {
 
     $cwd = (Get-Location).Path
 
-    # 3) Project-mapped external env fallback (loads from venv-mappings.json)
+    # 4) Project-mapped external env fallback
     $ProjectVenvMap = Get-ProjectVenvMap
     foreach ($ProjectRoot in $ProjectVenvMap.Keys) {
         if ($cwd.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -185,14 +300,13 @@ function .venv {
         }
     }
 
-    # 4) Dynamic central folder lookup (Fuzzy matching on paths in venv-search-paths.txt)
+    # 5) Dynamic central folder lookup
     $ProjectName = Split-Path $cwd -Leaf
     $CleanProjectName = $ProjectName.Replace("-", "").Replace("_", "")
     $SearchPaths = Get-VenvSearchPaths
     
     foreach ($Dir in $SearchPaths) {
         if (Test-Path $Dir) {
-            # Find first folder matching or containing the project directory name
             $Match = Get-ChildItem -Path $Dir -Directory | Where-Object { 
                 $CleanDirName = $_.Name.Replace("-", "").Replace("_", "")
                 $_.Name -like "$ProjectName*" -or 
@@ -209,3 +323,37 @@ function .venv {
 
     Write-Host "Error: Virtual environment not found." -ForegroundColor Red
 }
+
+# =====================================================================
+# 3. Environment Creation Methods
+# =====================================================================
+
+function New-Venv {
+    param(
+        [Parameter(Position = 0, Mandatory = $false)]
+        [string]$Path = ".venv"
+    )
+
+    # If user tries to pass any menu flag to mkvenv/make-venv, pass it to .venv instead
+    if ($Path -ine "" -and ($Path -eq "-m" -or $Path -eq "-M" -or $Path -eq "-Menu" -or $Path -eq "-menu")) {
+        .venv -Menu
+        return
+    }
+
+    Write-Host "Creating Python virtual environment at '$Path'..." -ForegroundColor Yellow
+    python -m venv $Path
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Environment created successfully! Activating..." -ForegroundColor Green
+        if ($Path -eq ".venv") {
+            .venv
+        } else {
+            .venv $Path
+        }
+    } else {
+        Write-Host "Error: Failed to create virtual environment." -ForegroundColor Red
+    }
+}
+
+Set-Alias -Name mkvenv -Value New-Venv
+Set-Alias -Name make-venv -Value New-Venv
