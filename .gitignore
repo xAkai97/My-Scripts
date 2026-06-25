@@ -10,9 +10,6 @@
 *.suo
 *.vs/
 
-# Log files generated at runtime
-service-history.log
-
 # IDE
 .idea/
 *.DotSettings
