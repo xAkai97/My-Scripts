@@ -21,3 +21,4 @@ service-history.log
 Thumbs.db
 Desktop.ini
 .DS_Store
+Service Editor/services-config.json
