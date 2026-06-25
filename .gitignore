@@ -1,1 +1,23 @@
+# FreeFileSync databases
 *.ffs_db
+
+# .NET build output
+**/bin/
+**/obj/
+
+# User-specific files
+*.user
+*.suo
+*.vs/
+
+# Log files generated at runtime
+service-history.log
+
+# IDE
+.idea/
+*.DotSettings
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

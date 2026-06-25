@@ -1,0 +1,24 @@
+{
+  "closeBehavior": "Ask",
+  "categories": ["Uncategorized", "Network/VPN", "Virtualization", "Gaming"],
+  "services": [
+    {
+      "name": "nordvpn-service",
+      "startupType": "Manual",
+      "enabled": true,
+      "category": "Network/VPN",
+      "linkedPrograms": ["NordVPN.exe"]
+    }
+  ],
+  "jobs": [
+    {
+      "id": "guid-here",
+      "name": "VMware Suite",
+      "linkedExecutable": "vmware.exe",
+      "serviceNames": ["VMAuthdService", "VMnetDHCP", "VMware NAT Service"],
+      "shutdownDelaySeconds": 30,
+      "enableToasts": true,
+      "autoStartStop": true
+    }
+  ]
+}

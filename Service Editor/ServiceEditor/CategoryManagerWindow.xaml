@@ -1,0 +1,68 @@
+<ui:FluentWindow x:Class="ServiceEditor.CategoryManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Category Manager" Height="450" Width="600"
+        Background="{ui:ThemeResource ApplicationBackgroundBrush}"
+        ExtendsContentIntoTitleBar="True"
+        WindowCornerPreference="Round"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Category Manager" />
+
+        <Grid Grid.Row="1" Margin="24,10,24,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Manage Categories" FontSize="20" FontWeight="Bold" Margin="0,0,0,20" Foreground="{ui:ThemeResource TextFillColorPrimaryBrush}"/>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Categories List -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                
+                <ListBox x:Name="LstCategories" Grid.Row="0" SelectionChanged="LstCategories_SelectionChanged" Margin="0,0,0,10"/>
+                
+                <StackPanel Grid.Row="1" Orientation="Horizontal">
+                    <ui:TextBox x:Name="TxtNewCategory" PlaceholderText="New category..." Width="130" Margin="0,0,10,0"/>
+                    <ui:Button Content="Add" Click="BtnAddCategory_Click"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Category Details -->
+            <StackPanel Grid.Column="2" x:Name="DetailsPanel" IsEnabled="False">
+                <TextBlock Text="Rename Category" FontWeight="Bold" Margin="0,0,0,8"/>
+                <ui:TextBox x:Name="TxtRename" Margin="0,0,0,10"/>
+                <ui:Button Content="Apply Rename" Click="BtnRename_Click" Margin="0,0,0,24"/>
+
+                <TextBlock Text="Delete Category" FontWeight="Bold" Foreground="#EF4444" Margin="0,0,0,8"/>
+                <TextBlock Text="Deleting this category will move its services to 'Uncategorized'." Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <ui:Button Content="Delete Category" Appearance="Danger" Click="BtnDelete_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Footer -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <ui:Button Content="Close" Appearance="Primary" Click="BtnClose_Click"/>
+        </StackPanel>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>
