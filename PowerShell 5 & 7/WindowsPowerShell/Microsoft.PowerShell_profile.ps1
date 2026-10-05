@@ -11,10 +11,9 @@ if (-not (Test-Path $Global:ProfileDir)) {
 
 # Configuration file paths (placed in the same folder as your PowerShell Profile)
 $Global:SearchPathsFile = Join-Path $Global:ProfileDir "venv-search-paths.txt"
-$Global:MappingsFile = Join-Path $Global:ProfileDir "venv-mappings.json"
 
 # Shared helper for activation
-function Activate-VenvPath {
+function Invoke-VenvPath {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ActivateScript,
@@ -58,54 +57,6 @@ function Get-VenvSearchPaths {
     return @()
 }
 
-# Dynamic Loader for manual mappings config
-function Get-ProjectVenvMap {
-    if (Test-Path $Global:MappingsFile) {
-        try {
-            $Json = Get-Content $Global:MappingsFile -Raw -ErrorAction SilentlyContinue
-            if ($Json) {
-                $Data = ConvertFrom-Json $Json
-                $Map = @{}
-                foreach ($Prop in $Data.PSObject.Properties) {
-                    $Map[$Prop.Name] = $Prop.Value
-                }
-                return $Map
-            }
-        } catch {
-            Write-Warning "Could not parse mapping file at $Global:MappingsFile"
-        }
-    }
-    return @{}
-}
-
-# Helper command to quickly map a project folder to a venv (saves to mappings JSON)
-function Register-ProjectVenv {
-    param(
-        [Parameter(Position = 0)]
-        [string]$ProjectRoot = (Get-Location).Path,
-        
-        [Parameter(Position = 1, Mandatory = $true)]
-        [string]$VenvPath
-    )
-    
-    $ProjectRoot = (Resolve-Path $ProjectRoot).Path
-    if (Test-Path $VenvPath) {
-        $VenvPath = (Resolve-Path $VenvPath).Path
-    } else {
-        Write-Warning "Target path '$VenvPath' does not exist."
-    }
-
-    $Map = Get-ProjectVenvMap
-    $Map[$ProjectRoot] = $VenvPath
-
-    try {
-        $Map | ConvertTo-Json | Out-File $Global:MappingsFile -Encoding utf8
-        Write-Host "Successfully mapped '$ProjectRoot' to '$VenvPath' in $Global:MappingsFile" -ForegroundColor Green
-    } catch {
-        Write-Host "Error saving mappings: $_" -ForegroundColor Red
-    }
-}
-
 # Add a central virtual environment search folder to the config file
 function Add-VenvSearchPath {
     param(
@@ -119,14 +70,13 @@ function Add-VenvSearchPath {
         Write-Warning "Search directory '$Path' does not exist."
     }
 
-    $Config = Get-VenvSearchPaths # Just returns paths array
-    $SearchPathsList = [System.Collections.Generic.List[string]]::new()
+    $SearchPathsList = @()
     if (Test-Path $Global:SearchPathsFile) {
-        $SearchPathsList.AddRange((Get-Content $Global:SearchPathsFile))
+        $SearchPathsList = @(Get-Content $Global:SearchPathsFile)
     }
     
-    if (-not $SearchPathsList.Contains($Path)) {
-        $SearchPathsList.Add($Path)
+    if ($Path -notin $SearchPathsList) {
+        $SearchPathsList += $Path
         $SearchPathsList | Out-File $Global:SearchPathsFile -Encoding utf8
         Write-Host "Added '$Path' to central venv search paths." -ForegroundColor Green
     }
@@ -136,25 +86,34 @@ function Add-VenvSearchPath {
 # 2. Main Functions (venv & .venv)
 # =====================================================================
 
-function venv {
-    param(
-        [Parameter(Position = 0, Mandatory = $false)]
-        [string]$EnvName
-    )
+function Show-VenvHelp {
+    Write-Host @"
 
-    # If menu flags are passed to venv, forward them to .venv
-    if ($EnvName -ine "" -and ($EnvName -eq "-m" -or $EnvName -eq "-M" -or $EnvName -eq "-Menu" -or $EnvName -eq "-menu")) {
-        .venv -Menu
-        return
-    }
+Python Virtual Environment Manager (.venv / venv)
+==================================================
 
-    Write-Host "Activating local venv..." -ForegroundColor Green
-    if (Test-Path ".\venv\Scripts\Activate.ps1") {
-        . .\venv\Scripts\Activate.ps1
-    } else {
-        Write-Host "Error: venv environment not found in current directory." -ForegroundColor Red
-    }
+Commands & Usage:
+  venv, .venv                   Auto-detect and activate virtual environment.
+                                Checks local (.venv, venv, custom), then central search paths.
+  venv, .venv -m, -Menu         Open interactive CLI menu to create or select environments.
+  venv, .venv <Name|Path>       Activate specific environment by name (central path) or path.
+  venv, .venv -h, -Help, -?     Display this help reference.
+
+Creation Commands:
+  mkvenv, make-venv [Path]      Create a virtual environment (default: .venv) and activate it.
+  mkvenv -m                     Open interactive creation menu.
+
+Central Search Paths:
+  Add-VenvSearchPath <Path>     Add a central search directory (e.g. D:\PythonEnvs).
+  Get-VenvSearchPaths           List configured search paths.
+
+Configuration:
+  Search Paths File: $Global:SearchPathsFile
+
+"@ -ForegroundColor Cyan
 }
+
+Set-Alias -Name venv -Value .venv
 
 function .venv {
     param(
@@ -162,14 +121,25 @@ function .venv {
         [string]$EnvName,
 
         [Parameter(Mandatory = $false)]
-        [switch]$Menu
+        [switch]$Menu,
+
+        [Parameter(Mandatory = $false)]
+        [Alias("h", "?")]
+        [switch]$Help
     )
     
+    # Check if help is requested
+    $IsHelpTrigger = $Help -or ($EnvName -ine "" -and ($EnvName -in @("-h", "--h", "-help", "--help", "help", "/?", "-?")))
+    if ($IsHelpTrigger) {
+        Show-VenvHelp
+        return
+    }
+
     # Check if the text argument matches any of the menu flags
-    $IsMenuTrigger = $EnvName -ine "" -and ($EnvName -eq "-m" -or $EnvName -eq "-M" -or $EnvName -eq "-Menu" -or $EnvName -eq "-menu")
+    $IsMenuTrigger = $Menu -or ($EnvName -ine "" -and ($EnvName -in @("-m", "-M", "-Menu", "-menu")))
 
     # 1) Menu Selection Mode
-    if ($Menu -or $IsMenuTrigger) {
+    if ($IsMenuTrigger) {
         $SearchDirs = Get-VenvSearchPaths
         $AvailableEnvs = [System.Collections.Generic.List[PSCustomObject]]::new()
         
@@ -195,7 +165,7 @@ function .venv {
         $MenuIndex = 1
 
         # OPTION 1: Always Current Folder Creation
-        Write-Host " [$MenuIndex] Create brand new '.venv' in CURRENT folder" -ForegroundColor Yellow
+        Write-Host " [$MenuIndex] Create brand new venv in CURRENT folder" -ForegroundColor Yellow
         $MenuIndex++
         
         # List existing environments
@@ -234,7 +204,17 @@ function .venv {
             
             # Choice 1: Current Folder Local Venv
             if ($SelectedIndex -eq 1) {
-                New-Venv -Path ".venv"
+                $InputName = Read-Host "Set folder name for your local environment [1: .venv or Enter Custom Name]"
+                if ($InputName -eq "q" -or $InputName -eq "quit" -or $InputName -eq "exit") {
+                    Write-Host "Operation cancelled." -ForegroundColor Gray
+                    return
+                }
+                if ([string]::IsNullOrWhiteSpace($InputName) -or $InputName -eq "1") {
+                    $NewName = ".venv"
+                } else {
+                    $NewName = $InputName
+                }
+                New-Venv -Path $NewName
                 return
             }
 
@@ -248,10 +228,16 @@ function .venv {
             # Choice: Create environment inside a central search path
             if ($CreationPaths.ContainsKey($SelectedIndex)) {
                 $BasePath = $CreationPaths[$SelectedIndex]
-                $NewName = Read-Host "Enter a folder name for your new environment"
-                if ([string]::IsNullOrWhiteSpace($NewName)) {
-                    Write-Host "Invalid name. Cancelling." -ForegroundColor Red
+                $CurrentFolder = Split-Path (Get-Location).Path -Leaf
+                $InputName = Read-Host "Set folder name for your new environment [1: $CurrentFolder or Enter Custom Name]"
+                if ($InputName -eq "q" -or $InputName -eq "quit" -or $InputName -eq "exit") {
+                    Write-Host "Operation cancelled." -ForegroundColor Gray
                     return
+                }
+                if ([string]::IsNullOrWhiteSpace($InputName) -or $InputName -eq "1") {
+                    $NewName = $CurrentFolder
+                } else {
+                    $NewName = $InputName
                 }
                 New-Venv -Path (Join-Path $BasePath $NewName)
                 return
@@ -269,39 +255,61 @@ function .venv {
     if ($EnvName -ne "") {
         if ([System.IO.Path]::IsPathRooted($EnvName)) {
             $DirectScript = if ($EnvName.EndsWith("Activate.ps1")) { $EnvName } else { Join-Path $EnvName "Scripts\Activate.ps1" }
-            if (Activate-VenvPath -ActivateScript $DirectScript -DisplayName $EnvName) { return }
+            if (Invoke-VenvPath -ActivateScript $DirectScript -DisplayName $EnvName) { return }
         }
 
         $RelativeScript = ".\$EnvName\Scripts\Activate.ps1"
-        if (Activate-VenvPath -ActivateScript $RelativeScript -DisplayName $EnvName) { return }
+        if (Invoke-VenvPath -ActivateScript $RelativeScript -DisplayName $EnvName) { return }
 
         Write-Host "Error: Virtual environment '$EnvName' not found." -ForegroundColor Red
         return
     }
 
-    # 3) Local fallback: .venv then venv directories
-    foreach ($LocalName in @(".venv", "venv")) {
-        $LocalScript = ".\$LocalName\Scripts\Activate.ps1"
-        if (Test-Path $LocalScript) {
-            Activate-VenvPath -ActivateScript $LocalScript -DisplayName $LocalName | Out-Null
+    $cwd = (Get-Location).Path
+
+    # Resolve project root (checks parent directories for .git, pyproject.toml, or requirements.txt)
+    $ProjectRoot = $cwd
+    $CheckDir = $cwd
+    while ($CheckDir) {
+        if ((Test-Path (Join-Path $CheckDir ".git")) -or 
+            (Test-Path (Join-Path $CheckDir "pyproject.toml")) -or 
+            (Test-Path (Join-Path $CheckDir "requirements.txt"))) {
+            $ProjectRoot = $CheckDir
+            break
+        }
+        $Parent = Split-Path $CheckDir -Parent
+        if ($Parent -eq $CheckDir -or [string]::IsNullOrWhiteSpace($Parent)) { break }
+        $CheckDir = $Parent
+    }
+
+    # 3) Local fallback: .venv, venv, or any custom local venv (in cwd or project root)
+    $CandidateDirs = @($cwd)
+    if ($ProjectRoot -ne $cwd) {
+        $CandidateDirs += $ProjectRoot
+    }
+
+    foreach ($BaseDir in $CandidateDirs) {
+        foreach ($LocalName in @(".venv", "venv")) {
+            $LocalScript = Join-Path $BaseDir "$LocalName\Scripts\Activate.ps1"
+            if (Test-Path $LocalScript) {
+                Invoke-VenvPath -ActivateScript $LocalScript -DisplayName $LocalName | Out-Null
+                return
+            }
+        }
+
+        $LocalCustomVenv = Get-ChildItem -Path $BaseDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+            Test-Path (Join-Path $_.FullName "Scripts\Activate.ps1")
+        } | Select-Object -First 1
+
+        if ($LocalCustomVenv) {
+            $LocalScript = Join-Path $LocalCustomVenv.FullName "Scripts\Activate.ps1"
+            Invoke-VenvPath -ActivateScript $LocalScript -DisplayName $LocalCustomVenv.Name | Out-Null
             return
         }
     }
 
-    $cwd = (Get-Location).Path
-
-    # 4) Project-mapped external env fallback
-    $ProjectVenvMap = Get-ProjectVenvMap
-    foreach ($ProjectRoot in $ProjectVenvMap.Keys) {
-        if ($cwd.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $EnvRoot = $ProjectVenvMap[$ProjectRoot]
-            $MappedScript = Join-Path $EnvRoot "Scripts\Activate.ps1"
-            if (Activate-VenvPath -ActivateScript $MappedScript -DisplayName $EnvRoot) { return }
-        }
-    }
-
-    # 5) Dynamic central folder lookup
-    $ProjectName = Split-Path $cwd -Leaf
+    # 4) Dynamic central folder lookup (matches project root name against search paths)
+    $ProjectName = Split-Path $ProjectRoot -Leaf
     $CleanProjectName = $ProjectName.Replace("-", "").Replace("_", "")
     $SearchPaths = Get-VenvSearchPaths
     
@@ -316,7 +324,7 @@ function .venv {
 
             if ($Match) {
                 $MappedScript = Join-Path $Match.FullName "Scripts\Activate.ps1"
-                if (Activate-VenvPath -ActivateScript $MappedScript -DisplayName $Match.Name) { return }
+                if (Invoke-VenvPath -ActivateScript $MappedScript -DisplayName $Match.Name) { return }
             }
         }
     }
@@ -331,11 +339,21 @@ function .venv {
 function New-Venv {
     param(
         [Parameter(Position = 0, Mandatory = $false)]
-        [string]$Path = ".venv"
+        [string]$Path = ".venv",
+
+        [Parameter(Mandatory = $false)]
+        [Alias("h", "?")]
+        [switch]$Help
     )
 
+    # If user asks for help, show help
+    if ($Help -or ($Path -ine "" -and ($Path -in @("-h", "--h", "-help", "--help", "help", "/?", "-?")))) {
+        Show-VenvHelp
+        return
+    }
+
     # If user tries to pass any menu flag to mkvenv/make-venv, pass it to .venv instead
-    if ($Path -ine "" -and ($Path -eq "-m" -or $Path -eq "-M" -or $Path -eq "-Menu" -or $Path -eq "-menu")) {
+    if ($Path -ine "" -and ($Path -in @("-m", "-M", "-Menu", "-menu"))) {
         .venv -Menu
         return
     }
