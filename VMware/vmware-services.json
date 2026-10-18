@@ -1,0 +1,10 @@
+{
+  "programPath": "C:\\Program Files\\VMware\\VMware Workstation\\vmware.exe",
+  "services": [
+    { "name": "VMAuthdService", "startupType": "Manual", "enabled": true },
+    { "name": "VmwareAutostartService", "startupType": "Manual", "enabled": true },
+    { "name": "VMnetDHCP", "startupType": "Manual", "enabled": true },
+    { "name": "VMware NAT Service", "startupType": "Manual", "enabled": true },
+    { "name": "VMUSBArbService", "startupType": "Manual", "enabled": true }
+  ]
+}

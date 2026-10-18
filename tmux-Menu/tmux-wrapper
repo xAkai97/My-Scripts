@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -e
+
+# Configuration
+SOCKET_NAME="${TMUX_AGENT_SOCKET:-agent_socket}"
+SOCKET=(-L "$SOCKET_NAME")
+LOG_DIR="${TMUX_AGENT_LOG_DIR:-/tmp/tmux-agent-logs}"
+TARGET_SHELL="${SHELL:-/bin/bash}"
+TMUX_BIN=$(command -v tmux || echo "/usr/bin/tmux")
+
+if [ ! -x "$TMUX_BIN" ]; then
+    echo "[Error] tmux binary not found in PATH." >&2
+    exit 1
+fi
+
+PROJ_ROOT=$(realpath "${WORKSPACE_ROOT:-$PWD}")
+
+hash_path() {
+    if command -v md5sum &>/dev/null; then
+        printf "%s" "$1" | md5sum | cut -c1-8
+    elif command -v md5 &>/dev/null; then
+        printf "%s" "$1" | md5 | cut -c1-8
+    else
+        printf "%s" "$1" | cksum | cut -c1-8
+    fi
+}
+
+CLEAN_PATH="${PROJ_ROOT#/mnt/}"
+SESSION_BASE=$(echo "$CLEAN_PATH" | tr '/' '_' | tr -c 'a-zA-Z0-9_' '_' | sed 's/^_*//;s/_*$//')
+[ -z "$SESSION_BASE" ] && SESSION_BASE="workspace"
+
+# AGENT EXECUTION PATH
+if [[ -n "$AI_AGENT" || -n "$AGENT_MODE" ]]; then
+    SESSION_HASH=$(hash_path "$PROJ_ROOT")
+    SESSION_NAME="${SESSION_BASE}_${SESSION_HASH}_agent"
+    LOG_FILE="$LOG_DIR/${SESSION_NAME}.log"
+
+    ensure_agent_session() {
+        mkdir -p "$LOG_DIR"
+        if ! "$TMUX_BIN" "${SOCKET[@]}" has-session -t "$SESSION_NAME" 2>/dev/null; then
+            "$TMUX_BIN" "${SOCKET[@]}" new-session -d -s "$SESSION_NAME" \
+                -c "$PROJ_ROOT" \
+                -e "AI_AGENT=true" \
+                "$TARGET_SHELL"
+
+            "$TMUX_BIN" "${SOCKET[@]}" set-window-option -t "$SESSION_NAME" aggressive-resize on 2>/dev/null || true
+            "$TMUX_BIN" "${SOCKET[@]}" set-option -t "$SESSION_NAME" default-terminal "xterm-256color" 2>/dev/null || true
+
+            touch "$LOG_FILE"
+            "$TMUX_BIN" "${SOCKET[@]}" pipe-pane -t "$SESSION_NAME" -o "cat >> '$LOG_FILE'"
+        fi
+    }
+
+    if [[ "$1" == "-c" ]]; then
+        shift
+        TARGET_CMD="$*"
+
+        if [[ "$TARGET_CMD" =~ ^(direct|tmux|tail) ]]; then
+            TARGET_CMD="${TARGET_CMD#direct }"
+            exec "$TARGET_SHELL" -c "$TARGET_CMD"
+        fi
+
+        ensure_agent_session
+
+        printf "\n\033[1;34m=== %s Executing via Tmux: %s ===\033[0m\n" "$(date '+%H:%M:%S')" "$TARGET_CMD" >> "$LOG_FILE"
+        "$TMUX_BIN" "${SOCKET[@]}" send-keys -t "$SESSION_NAME" -l "$TARGET_CMD"
+        "$TMUX_BIN" "${SOCKET[@]}" send-keys -t "$SESSION_NAME" C-m
+        exit 0
+    else
+        ensure_agent_session
+        exec "$TMUX_BIN" "${SOCKET[@]}" attach-session -t "$SESSION_NAME"
+    fi
+
+# HUMAN INTERACTIVE PATH
+else
+    SESSION_NAME="$SESSION_BASE"
+    exec "$TMUX_BIN" new-session -A -s "$SESSION_NAME" -c "$PROJ_ROOT"
+fi
