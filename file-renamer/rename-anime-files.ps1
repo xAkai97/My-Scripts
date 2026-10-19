@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$RunMode = "DRY",
     [string]$DroppedPath = ""
 )
@@ -25,7 +25,7 @@ if ($DroppedPath -ne "") {
 
 foreach ($file in $files) {
     # Skip the utility scripts
-    if ($file.Name -match '^(Rename-AnimeFiles\.ps1|Run-Renamer\.bat|Run-Fix\.bat|Fix-Fuse`$\.ps1)$') { continue }
+    if ($file.Name -match '^(rename-anime-files\.(ps1|bat))$') { continue }
 
     $name = $file.BaseName
     $ext = $file.Extension

@@ -5,5 +5,5 @@ if "%~1"=="" (
     exit /b
 )
 
-powershell -ExecutionPolicy Bypass -File "%~dp0Fix-Fuse$.ps1" "%~1"
+powershell -ExecutionPolicy Bypass -File "%~dp0fix-fuse$.ps1" "%~1"
 pause

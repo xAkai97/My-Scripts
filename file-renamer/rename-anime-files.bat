@@ -7,9 +7,9 @@ set "TARGET=%~1"
 
 :MENU
 cls
-echo ==========================================
-echo    UNIVERSAL FILE RENAMER - MODE SELECT
-echo ==========================================
+echo ==================================================
+echo    UNIVERSAL Anime FILES RENAMER - MODE SELECT
+echo ==================================================
 
 :: Flat IF statements to prevent parenthesis crashing
 if "%TARGET%"=="" echo Target: Current Folder (Default)
@@ -33,7 +33,7 @@ goto MENU
 :DRYRUN
 echo.
 echo Running Dry Run Preview...
-powershell -ExecutionPolicy Bypass -File "%~dp0Rename-AnimeFiles.ps1" "DRY" "%TARGET%"
+powershell -ExecutionPolicy Bypass -File "%~dp0rename-anime-files.ps1" "DRY" "%TARGET%"
 echo.
 pause
 goto MENU
@@ -41,7 +41,7 @@ goto MENU
 :REALRUN
 echo.
 echo [WARNING] Running Live Rename...
-powershell -ExecutionPolicy Bypass -File "%~dp0Rename-AnimeFiles.ps1" "LIVE" "%TARGET%"
+powershell -ExecutionPolicy Bypass -File "%~dp0rename-anime-files.ps1" "LIVE" "%TARGET%"
 echo.
 pause
 exit
